@@ -1,0 +1,137 @@
+#!/usr/bin/perl
+
+###########################################################
+#
+# A simple command-line Pushover.net notifier script.
+#
+# Run it with the --help option for usage instructions.
+#
+# Written October 12, 2023, by Lester Hightower
+#
+###########################################################
+
+use strict;
+use LWP::UserAgent;
+use File::Basename qw(basename);
+use Data::Dumper;
+use JSON qw(decode_json);
+use Getopt::Long;
+Getopt::Long::Configure(qw(no_auto_abbrev));
+
+my $API_ENDPOINT = 'https://api.pushover.net/1/messages.json';
+
+our $APP_NAME = basename($0);
+our $opts = MyGetOpts(); # Will only return with options we think we can use
+
+my $pushover_parms = {
+    "token"    => $opts->{token},
+    "user"     => $opts->{user},
+    "message"  => $opts->{msg},
+    "priority" => $opts->{priority},
+    "sound"    => $opts->{sound},
+  };
+#print Dumper($pushover_parms)."\n";
+my $response = LWP::UserAgent->new()->post($API_ENDPOINT, $pushover_parms);
+#print Dumper($response) . "\n";
+
+my @errs = ();
+if (! $response->is_success ) {
+  push @errs, "HTTP POST failed as follows: ". $response->status_line;
+}
+eval { # Eval in case we don't have a valid JSON response
+  my $json_resp = $response->content;
+  my $resp = decode_json($json_resp);
+  if (defined($resp->{errors})) {
+    push @errs, @{$resp->{errors}};
+  }
+};
+
+if (scalar(@errs)) {
+  my $li = " * ";
+  die "There were errors, as follows:\n$li".join("\n$li",@errs)."\n";
+}
+
+print "Success\n" if (! $opts->{quiet});
+
+exit;
+
+#############################################################################
+#############################################################################
+#############################################################################
+
+sub MyGetOpts {
+  my %opts=();
+  my @params = ( "user=s", "token=s", "msg=s", 'sound=s', 'priority=i',
+		'quiet', "help", "h", );
+  my $result = &GetOptions(\%opts, @params);
+
+  my $use_help_msg = "Use --help to see information on command line options.";
+
+  # Set any undefined booleans to 0
+  foreach my $param (@params) {
+    if ($param !~ m/=/ && (! defined($opts{$param}))) {
+      $opts{$param} = 0; # Booleans
+    }
+  }
+
+  # If the user asked for help give it and exit
+  if ($opts{help} || $opts{h}) {
+    print GetUsageMessage();
+    exit;
+  }
+
+  # If GetOptions failed it told the user why, so let's exit.
+  if (! int($result)) {
+    print "\n" . $use_help_msg . "\n";
+    exit;
+  }
+
+  my @errs = ();
+
+  foreach my $reqparam (qw(user token msg)) {
+    if (! (defined($opts{$reqparam}) && length($opts{$reqparam}))) {
+      push @errs, "Missing required parameter --$reqparam";
+    }
+  }
+
+  $opts{priority} = 0 if not defined($opts{priority});
+  if ($opts{priority} < -2 || $opts{priority} > 2) {
+    push @errs, "The --priority parameter is out of range.";
+  }
+
+  $opts{'sound'} = 'pushover' if not defined($opts{sound});
+
+  if (scalar(@errs)) {
+    warn "There were errors:\n" .
+        "  " . join("\n  ", @errs) . "\n\n";
+    print $use_help_msg . "\n";
+    exit;
+  }
+
+  return \%opts;
+}
+
+sub GetUsageMessage {
+  my $parmlen = 14;
+  my $col1len = $parmlen + 3;
+  my $pwlen = our $DEFAULT_PASSWD_LEN;
+  my @params = (
+    [ 'user=s'      => 'The Pushover user to message.' ],
+    [ 'token=s'     => 'The Pushover API token to use.' ],
+    [ 'msg=s'       => 'The message to send.' ],
+    [ 'sound=s'     => 'The sound to use. See https://pushover.net/api#sounds' ],
+    [ 'priority=i'  => 'The message priority (-2..2). See https://pushover.net/api#priority' ],
+    [ 'quiet'       => 'Don\'t write the "Success" message on success.' ],
+    [ help          => 'This message.' ],
+  );
+  my $t="Usage: $APP_NAME --user=<user-key> --token=<token> --msg <message>\n" .
+  "\n";
+  foreach my $param (@params) {
+    my $fmt = '  %-'.$parmlen.'s %s';
+    $t .= sprintf("$fmt\n", '--'.$param->[0], $param->[1]);
+  }
+  $t .= "\n" .
+  "";
+  return $t;
+}
+
