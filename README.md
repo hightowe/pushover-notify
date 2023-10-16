@@ -1,5 +1,5 @@
 # pushover-notify
-A simple command-line Pushover.net notifier script, written in Perl
+A simple command-line [Pushover.net](https://pushover.net) notifier script, written in Perl
 
 ## Usage ##
 ~~~
