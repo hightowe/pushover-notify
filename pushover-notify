@@ -29,7 +29,9 @@ my $pushover_parms = {
     "message"  => $opts->{msg},
     "priority" => $opts->{priority},
     "sound"    => $opts->{sound},
+    "retry"    => $opts->{retry} // 0,
   };
+$pushover_parms->{expire} = $opts->{expire} if defined($opts->{expire});
 #print Dumper($pushover_parms)."\n";
 my $response = LWP::UserAgent->new()->post($API_ENDPOINT, $pushover_parms);
 #print Dumper($response) . "\n";
@@ -61,7 +63,8 @@ exit;
 
 sub MyGetOpts {
   my %opts=();
-  my @params = ( "user=s", "token=s", "msg=s", 'sound=s', 'priority=i',
+  my @params = ( "user=s", "token=s", "msg=s", 'sound=s',
+		'priority=i', 'retry=i', 'expire=i',
 		'quiet', "help", "h", );
   my $result = &GetOptions(\%opts, @params);
 
@@ -96,7 +99,26 @@ sub MyGetOpts {
 
   $opts{priority} = 0 if not defined($opts{priority});
   if ($opts{priority} < -2 || $opts{priority} > 2) {
-    push @errs, "The --priority parameter is out of range.";
+    push @errs, "The --priority parameter is out of range (-2 .. 2).";
+  }
+
+  if (defined($opts{retry}) && $opts{retry} < 30) {
+    push @errs, "The --retry parameter minimum is 30 seconds.";
+  }
+
+  if (defined($opts{expire}) && $opts{expire} > 10800) {
+    push @errs, "The --expire parameter maximum is 10800 seconds (3 hours).";
+  }
+
+  # Priority 2 messages require both expire and retry
+  #   - https://pushover.net/api#priority
+  # If the priority is set to 2 and no expire is set, max it out
+  if (!defined($opts{expire}) && $opts{priority} == 2) {
+    $opts{expire} = 60*60 * 3; # 3 hours (max allowed)
+  }
+  # If the priority is set to 2 and no retry is set, max it out
+  if (!defined($opts{retry}) && $opts{priority} == 2) {
+    $opts{retry} = 30; # 30 secs (min allowed)
   }
 
   $opts{'sound'} = 'pushover' if not defined($opts{sound});
@@ -121,6 +143,8 @@ sub GetUsageMessage {
     [ 'msg=s'       => 'The message to send.' ],
     [ 'sound=s'     => 'The sound to use. See https://pushover.net/api#sounds' ],
     [ 'priority=i'  => 'The message priority (-2..2). See https://pushover.net/api#priority' ],
+    [ 'retry=i'     => 'How often to retry (every i seconds)' ],
+    [ 'expire=i'    => 'How many seconds until an unacknowleged message expires.' ],
     [ 'quiet'       => 'Don\'t write the "Success" message on success.' ],
     [ help          => 'This message.' ],
   );
@@ -134,4 +158,3 @@ sub GetUsageMessage {
   "";
   return $t;
 }
-
