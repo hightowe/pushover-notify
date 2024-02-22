@@ -11,6 +11,9 @@ Usage: pushover-notify --user=<user-key> --token=<token> --msg <message>
   --msg=s        The message to send.
   --sound=s      The sound to use. See https://pushover.net/api#sounds
   --priority=i   The message priority (-2..2). See https://pushover.net/api#priority
+  --retry=i      How often to retry (every i seconds)
+  --expire=i     How many seconds until an unacknowleged message expires.
+  --ttl=i        Message time to live. See https://pushover.net/api#ttl
   --quiet        Don't write the "Success" message on success.
   --help         This message.
 ~~~
