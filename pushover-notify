@@ -31,7 +31,10 @@ my $pushover_parms = {
     "sound"    => $opts->{sound},
     "retry"    => $opts->{retry} // 0,
   };
-$pushover_parms->{expire} = $opts->{expire} if defined($opts->{expire});
+my @opt_params = qw(expire ttl);
+foreach my $opt_param (@opt_params) {
+  $pushover_parms->{$opt_param} = $opts->{$opt_param} if defined($opts->{$opt_param});
+}
 #print Dumper($pushover_parms)."\n";
 my $response = LWP::UserAgent->new()->post($API_ENDPOINT, $pushover_parms);
 #print Dumper($response) . "\n";
@@ -64,7 +67,7 @@ exit;
 sub MyGetOpts {
   my %opts=();
   my @params = ( "user=s", "token=s", "msg=s", 'sound=s',
-		'priority=i', 'retry=i', 'expire=i',
+		'priority=i', 'retry=i', 'expire=i', 'ttl=i',
 		'quiet', "help", "h", );
   my $result = &GetOptions(\%opts, @params);
 
@@ -120,6 +123,10 @@ sub MyGetOpts {
   if (!defined($opts{retry}) && $opts{priority} == 2) {
     $opts{retry} = 30; # 30 secs (min allowed)
   }
+  # Warn about --ttl being ignored for priority 2 messages
+  if (defined($opts{ttl}) && $opts{priority} == 2) {
+    warn "The --ttl parameter is ignored for emergency, priority=2 messages\n";
+  }
 
   $opts{'sound'} = 'pushover' if not defined($opts{sound});
 
@@ -145,6 +152,7 @@ sub GetUsageMessage {
     [ 'priority=i'  => 'The message priority (-2..2). See https://pushover.net/api#priority' ],
     [ 'retry=i'     => 'How often to retry (every i seconds)' ],
     [ 'expire=i'    => 'How many seconds until an unacknowleged message expires.' ],
+    [ 'ttl=i'       => 'Message time to live. See https://pushover.net/api#ttl' ],
     [ 'quiet'       => 'Don\'t write the "Success" message on success.' ],
     [ help          => 'This message.' ],
   );
