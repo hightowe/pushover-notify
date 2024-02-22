@@ -21,7 +21,7 @@ Usage: pushover-notify --user=<user-key> --token=<token> --msg <message>
 ### Examples ###
 #### Command line ####
 ~~~
-$ pushover-notify --user pushover_user --token pushover_token --msg Message from Pushover" --sound intermission --priority 1
+$ pushover-notify --user pushover_user --token pushover_token --msg "Message from Pushover" --sound intermission --priority 1
 Success
 ~~~
 
