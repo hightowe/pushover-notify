@@ -4,11 +4,14 @@ A simple command-line [Pushover.net](https://pushover.net) notifier script, writ
 ## Usage ##
 ~~~
 $ pushover-notify --help
-Usage: pushover-notify --user=<user-key> --token=<token> --msg <message>
+Usage: pushover-notify --user=<user-key> --token=<token> [action] [options]
 
-  --user=s       The Pushover user to message.
-  --token=s      The Pushover API token to use.
+Actions (at least one required):
   --msg=s        The message to send.
+  --chkdev       Check that the target --device is valid/active (requires --device).
+
+Options:
+  --device=s     The target device name (for targeting or validation).
   --sound=s      The sound to use. See https://pushover.net/api#sounds
   --priority=i   The message priority (-2..2). See https://pushover.net/api#priority
   --retry=i      How often to retry (every i seconds)
@@ -21,7 +24,20 @@ Usage: pushover-notify --user=<user-key> --token=<token> --msg <message>
 ### Examples ###
 #### Command line ####
 ~~~
+# Broadcast message to all active devices on user account
 $ pushover-notify --user pushover_user --token pushover_token --msg "Message from Pushover" --sound intermission --priority 1
+Success
+
+# Send message to a specific device
+$ pushover-notify --user pushover_user --token pushover_token --device pixel9a --msg "Message to pixel9a only"
+Success
+
+# Check that a device is active and valid (e.g. in health monitoring scripts)
+$ pushover-notify --user pushover_user --token pushover_token --device pixel9a --chkdev
+Success
+
+# Pre-validate device before sending (aborts message if device is inactive)
+$ pushover-notify --user pushover_user --token pushover_token --device pixel9a --chkdev --msg "Critical ping"
 Success
 ~~~
 
@@ -30,4 +46,7 @@ Success
 $ crontab -l|grep mailq
 # Monitor for the mailq backing up on this host
 3 */2 * * * [ "$(mailq | grep -c -E -i '^[a-z0-9]+')" -lt 5 ] || pushover-notify --user pushover_user --token pushover_token --priority 2 --sound intermission --quiet --msg "[$(hostname)] mailq is over the limit"
+
+# Monitor that an expected device is active on a user's Pushover account
+0 */4 * * * pushover-notify --user pushover_user --token pushover_token --device pixel9a --chkdev --quiet
 ~~~

@@ -18,47 +18,104 @@ use JSON qw(decode_json);
 use Getopt::Long;
 Getopt::Long::Configure(qw(no_auto_abbrev));
 
-my $API_ENDPOINT = 'https://api.pushover.net/1/messages.json';
+my $MSG_API_ENDPOINT = 'https://api.pushover.net/1/messages.json';
+my $VAL_API_ENDPOINT = 'https://api.pushover.net/1/users/validate.json';
 
 our $APP_NAME = basename($0);
 our $opts = MyGetOpts(); # Will only return with options we think we can use
 
-my $pushover_parms = {
-    "token"    => $opts->{token},
-    "user"     => $opts->{user},
-    "message"  => $opts->{msg},
-    "priority" => $opts->{priority},
-    "sound"    => $opts->{sound},
-    "retry"    => $opts->{retry} // 0,
-  };
-my @opt_params = qw(expire ttl);
-foreach my $opt_param (@opt_params) {
-  $pushover_parms->{$opt_param} = $opts->{$opt_param} if defined($opts->{$opt_param});
-}
-#print Dumper($pushover_parms)."\n";
-my $response = LWP::UserAgent->new()->post($API_ENDPOINT, $pushover_parms);
-#print Dumper($response) . "\n";
+if ($opts->{chkdev}) {
+  my $val_params = [
+    token  => $opts->{token},
+    user   => $opts->{user},
+    device => $opts->{device},
+  ];
 
-my @errs = ();
-if (! $response->is_success ) {
-  push @errs, "HTTP POST failed as follows: ". $response->status_line;
-}
-eval { # Eval in case we don't have a valid JSON response
-  my $json_resp = $response->content;
-  my $resp = decode_json($json_resp);
-  if (defined($resp->{errors})) {
-    push @errs, @{$resp->{errors}};
+  my $response = LWP::UserAgent->new()->post($VAL_API_ENDPOINT, $val_params);
+  my @errs = ();
+
+  if (! $response->is_success && $response->code >= 500) {
+    push @errs, "HTTP POST failed as follows: " . $response->status_line;
+  } else {
+    my $data;
+    eval {
+      $data = decode_json($response->content);
+    };
+    if ($@ || !defined $data) {
+      if (! $response->is_success) {
+        push @errs, "HTTP POST failed as follows: " . $response->status_line;
+      } else {
+        push @errs, "Failed to parse JSON response from Pushover";
+      }
+    } elsif (! $data->{status}) {
+      if (defined($data->{errors}) && ref($data->{errors}) eq 'ARRAY') {
+        push @errs, @{$data->{errors}};
+      } else {
+        push @errs, "Device '$opts->{device}' validation failed";
+      }
+    } else {
+      my @active_devices = @{ $data->{devices} // [] };
+      if (! grep { $_ eq $opts->{device} } @active_devices) {
+        push @errs, sprintf(
+          "Device '%s' missing from active list (found: %s)",
+          $opts->{device},
+          @active_devices ? join(', ', @active_devices) : 'none'
+        );
+      }
+    }
   }
-};
 
-if (scalar(@errs)) {
-  my $li = " * ";
-  die "There were errors, as follows:\n$li".join("\n$li",@errs)."\n";
+  if (scalar(@errs)) {
+    my $li = " * ";
+    die "There were errors, as follows:\n$li" . join("\n$li", @errs) . "\n";
+  }
+
+  if (! defined($opts->{msg})) {
+    print "Success\n" if (! $opts->{quiet});
+    exit 0;
+  }
 }
 
-print "Success\n" if (! $opts->{quiet});
+if (defined($opts->{msg})) {
+  my $pushover_parms = {
+      "token"    => $opts->{token},
+      "user"     => $opts->{user},
+      "message"  => $opts->{msg},
+      "priority" => $opts->{priority},
+      "sound"    => $opts->{sound},
+      "retry"    => $opts->{retry} // 0,
+    };
+  $pushover_parms->{device} = $opts->{device} if defined($opts->{device});
 
-exit;
+  my @opt_params = qw(expire ttl);
+  foreach my $opt_param (@opt_params) {
+    $pushover_parms->{$opt_param} = $opts->{$opt_param} if defined($opts->{$opt_param});
+  }
+  #print Dumper($pushover_parms)."\n";
+  my $response = LWP::UserAgent->new()->post($MSG_API_ENDPOINT, $pushover_parms);
+  #print Dumper($response) . "\n";
+
+  my @errs = ();
+  if (! $response->is_success ) {
+    push @errs, "HTTP POST failed as follows: ". $response->status_line;
+  }
+  eval { # Eval in case we don't have a valid JSON response
+    my $json_resp = $response->content;
+    my $resp = decode_json($json_resp);
+    if (defined($resp->{errors})) {
+      push @errs, @{$resp->{errors}};
+    }
+  };
+
+  if (scalar(@errs)) {
+    my $li = " * ";
+    die "There were errors, as follows:\n$li".join("\n$li",@errs)."\n";
+  }
+
+  print "Success\n" if (! $opts->{quiet});
+}
+
+exit 0;
 
 #############################################################################
 #############################################################################
@@ -66,7 +123,7 @@ exit;
 
 sub MyGetOpts {
   my %opts=();
-  my @params = ( "user=s", "token=s", "msg=s", 'sound=s',
+  my @params = ( "user=s", "token=s", "msg=s", "device=s", "chkdev", 'sound=s',
 		'priority=i', 'retry=i', 'expire=i', 'ttl=i',
 		'quiet', "help", "h", );
   my $result = &GetOptions(\%opts, @params);
@@ -94,47 +151,60 @@ sub MyGetOpts {
 
   my @errs = ();
 
-  foreach my $reqparam (qw(user token msg)) {
+  foreach my $reqparam (qw(user token)) {
     if (! (defined($opts{$reqparam}) && length($opts{$reqparam}))) {
       push @errs, "Missing required parameter --$reqparam";
     }
   }
 
-  $opts{priority} = 0 if not defined($opts{priority});
-  if ($opts{priority} < -2 || $opts{priority} > 2) {
-    push @errs, "The --priority parameter is out of range (-2 .. 2).";
+  my $has_msg = defined($opts{msg}) && length($opts{msg});
+  my $has_chkdev = $opts{chkdev} ? 1 : 0;
+
+  if (! $has_msg && ! $has_chkdev) {
+    push @errs, "Missing required action: specify --msg, --chkdev, or both.";
   }
 
-  if (defined($opts{retry}) && $opts{retry} < 30) {
-    push @errs, "The --retry parameter minimum is 30 seconds.";
+  if ($has_chkdev && (! (defined($opts{device}) && length($opts{device})))) {
+    push @errs, "The --chkdev option requires --device=<devname>.";
   }
 
-  if (defined($opts{expire}) && $opts{expire} > 10800) {
-    push @errs, "The --expire parameter maximum is 10800 seconds (3 hours).";
-  }
+  if ($has_msg) {
+    $opts{priority} = 0 if not defined($opts{priority});
+    if ($opts{priority} < -2 || $opts{priority} > 2) {
+      push @errs, "The --priority parameter is out of range (-2 .. 2).";
+    }
 
-  # Priority 2 messages require both expire and retry
-  #   - https://pushover.net/api#priority
-  # If the priority is set to 2 and no expire is set, max it out
-  if (!defined($opts{expire}) && $opts{priority} == 2) {
-    $opts{expire} = 60*60 * 3; # 3 hours (max allowed)
-  }
-  # If the priority is set to 2 and no retry is set, max it out
-  if (!defined($opts{retry}) && $opts{priority} == 2) {
-    $opts{retry} = 30; # 30 secs (min allowed)
-  }
-  # Warn about --ttl being ignored for priority 2 messages
-  if (defined($opts{ttl}) && $opts{priority} == 2) {
-    warn "The --ttl parameter is ignored for emergency, priority=2 messages\n";
-  }
+    if (defined($opts{retry}) && $opts{retry} < 30) {
+      push @errs, "The --retry parameter minimum is 30 seconds.";
+    }
 
-  $opts{'sound'} = 'pushover' if not defined($opts{sound});
+    if (defined($opts{expire}) && $opts{expire} > 10800) {
+      push @errs, "The --expire parameter maximum is 10800 seconds (3 hours).";
+    }
+
+    # Priority 2 messages require both expire and retry
+    #   - https://pushover.net/api#priority
+    # If the priority is set to 2 and no expire is set, max it out
+    if (!defined($opts{expire}) && $opts{priority} == 2) {
+      $opts{expire} = 60*60 * 3; # 3 hours (max allowed)
+    }
+    # If the priority is set to 2 and no retry is set, max it out
+    if (!defined($opts{retry}) && $opts{priority} == 2) {
+      $opts{retry} = 30; # 30 secs (min allowed)
+    }
+    # Warn about --ttl being ignored for priority 2 messages
+    if (defined($opts{ttl}) && $opts{priority} == 2) {
+      warn "The --ttl parameter is ignored for emergency, priority=2 messages\n";
+    }
+
+    $opts{'sound'} = 'pushover' if not defined($opts{sound});
+  }
 
   if (scalar(@errs)) {
     warn "There were errors:\n" .
         "  " . join("\n  ", @errs) . "\n\n";
     print $use_help_msg . "\n";
-    exit;
+    exit 1;
   }
 
   return \%opts;
@@ -142,12 +212,12 @@ sub MyGetOpts {
 
 sub GetUsageMessage {
   my $parmlen = 14;
-  my $col1len = $parmlen + 3;
-  my $pwlen = our $DEFAULT_PASSWD_LEN;
-  my @params = (
-    [ 'user=s'      => 'The Pushover user to message.' ],
-    [ 'token=s'     => 'The Pushover API token to use.' ],
+  my @actions = (
     [ 'msg=s'       => 'The message to send.' ],
+    [ 'chkdev'      => 'Check that the target --device is valid/active (requires --device).' ],
+  );
+  my @options = (
+    [ 'device=s'    => 'The target device name (for targeting or validation).' ],
     [ 'sound=s'     => 'The sound to use. See https://pushover.net/api#sounds' ],
     [ 'priority=i'  => 'The message priority (-2..2). See https://pushover.net/api#priority' ],
     [ 'retry=i'     => 'How often to retry (every i seconds)' ],
@@ -156,13 +226,19 @@ sub GetUsageMessage {
     [ 'quiet'       => 'Don\'t write the "Success" message on success.' ],
     [ help          => 'This message.' ],
   );
-  my $t="Usage: $APP_NAME --user=<user-key> --token=<token> --msg <message>\n" .
-  "\n";
-  foreach my $param (@params) {
+  my $t="Usage: $APP_NAME --user=<user-key> --token=<token> [action] [options]\n" .
+  "\n" .
+  "Actions (at least one required):\n";
+  foreach my $param (@actions) {
     my $fmt = '  %-'.$parmlen.'s %s';
     $t .= sprintf("$fmt\n", '--'.$param->[0], $param->[1]);
   }
   $t .= "\n" .
-  "";
+  "Options:\n";
+  foreach my $param (@options) {
+    my $fmt = '  %-'.$parmlen.'s %s';
+    $t .= sprintf("$fmt\n", '--'.$param->[0], $param->[1]);
+  }
+  $t .= "\n";
   return $t;
 }
